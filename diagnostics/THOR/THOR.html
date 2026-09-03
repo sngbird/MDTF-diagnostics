@@ -1,0 +1,45 @@
+<!--
+    Output template for the THOR POD. EPS files saved to
+    <WK_DIR>/model/PS/<name>.eps are converted by the framework into
+    <WK_DIR>/model/<name>.png, so links below only need the relative path.
+-->
+<title>THOR ocean dynamical regime classifier</title>
+<img src="../mdtf_diag_banner.png">
+<h3>THOR: ocean dynamical regime classification</h3>
+<p>
+Classifies each ocean grid point into one of 6 dynamical regimes, using a
+pretrained 50-model MLP ensemble driven by 8 physical features derived from
+sea surface height, wind stress, and bathymetry (Yik et al. 2023,
+THOR-MOM6). Alongside the regime map, THOR reports a per-point prediction
+entropy: how much the 50 ensemble members agree, as a confidence
+companion to the majority-vote classification.
+</p>
+<p>
+{{CASENAME}}, {{startdate}}-{{enddate}}
+</p>
+<TABLE>
+<TR>
+<TH align=left style="color:navy;">Whole domain
+<TH align=center><A href=model/{{CASENAME}}_regimes.png>regime map</A>
+<TH align=center><A href=model/{{CASENAME}}_entropy.png>entropy map</A>
+<TR>
+<TH align=left style="color:navy;">Named basins
+<TH align=center><A href=model/{{CASENAME}}_basins.png>regime map</A>
+<TH align=center><A href=model/{{CASENAME}}_entropy_basins.png>entropy map</A>
+</TABLE>
+<p>
+Basin plots additionally outline the sharpest {{FRONT_PERCENTILE}}th-percentile
+SSH gradient within each basin box, when FRONT_CONTOUR is enabled - this
+traces the jet/current core itself (e.g. the Gulf Stream, the Kuroshio
+Extension), independent of THOR's own classification, as a visual check on
+how well the two line up.
+</p>
+<!--
+    LRP/SHAP feature-attribution plots below only exist when RUN_EXPLAIN was
+    set to "true" for this run - see doc/THOR.rst.
+-->
+<TABLE>
+<TR>
+<TH align=left style="color:navy;">Explainability (if RUN_EXPLAIN was enabled)
+<TH align=center><A href=model/{{CASENAME}}_lrp.png>LRP - whole domain</A>
+</TABLE>

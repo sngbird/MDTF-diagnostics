@@ -1,0 +1,89 @@
+// THOR ocean dynamical-regime classifier - MDTF POD settings
+//
+// THOR (github.com/Zhang-ping-Yu/THOR, adapted from Yik et al. 2023,
+// THOR-MOM6) classifies each ocean grid point into one of 6 dynamical
+// regimes using a 50-model MLP ensemble, from 8 physical features derived
+// from SSH, wind stress, and bathymetry. This POD builds those features
+// from the case's staged model output, runs the ensemble, and plots the
+// resulting regime map plus a per-point prediction-entropy (confidence)
+// map. LRP/SHAP feature-attribution plots are available as an optional,
+// off-by-default stage (RUN_EXPLAIN) since SHAP is expensive.
+{
+  "settings": {
+    "driver": "THOR.py",
+    "long_name": "THOR ocean dynamical regime classifier",
+    "convention": "cmip",
+    "description": "Classifies ocean dynamical regimes from SSH, wind stress curl, and bathymetry using THOR's pretrained ensemble",
+
+    // Tunable knobs a user can override at runtime without editing the
+    // driver - mirrors the config-cell levers the original notebooks
+    // exposed (BASINS, FRONT_PERCENTILE, SHAP_METHOD, ...).
+    "pod_env_vars": {
+      "BASINS": "na,ke",           // comma-separated basin keys to plot, or "" for whole-domain only
+      "FRONT_CONTOUR": "true",     // outline the jet/front from the SSH gradient on basin plots
+      "FRONT_PERCENTILE": "90",    // contour the steepest (100 - this)% of SSH gradient within each basin
+      "RUN_EXPLAIN": "false",      // also run LRP (whole domain) + SHAP (one basin) - LRP is cheap,
+                                    // SHAP is not (see thor_lib/explain.py) - off by default
+      "SHAP_BASIN": "na",          // basin SHAP is scoped to, when RUN_EXPLAIN is on
+      "SHAP_METHOD": "fast",       // "fast" (fastshap, approximate, ~4x faster) or "exact" (shap package)
+      "SHAP_BACKGROUND_SIZE": "100", // random subsample of the domain used as SHAP's background -
+                                      // memory/time scale with this x basin points x coalitions, so
+                                      // keep it small (a few hundred) even on fine-resolution grids
+      "LRP_EPSILON_SCALE": "0.25", // LRP epsilon-rule stabilizer, as a fraction of each layer's z-std
+      "N_MODELS": "50"             // how many of the 50 ensemble members to use (fewer = faster, less stable)
+    },
+
+    "runtime_requirements": {
+      "python3": ["numpy", "xarray", "scikit-learn", "matplotlib", "tensorflow", "keras"]
+    }
+  },
+
+  "dimensions": {
+    "lat": {
+      "standard_name": "latitude",
+      "units": "degrees_north",
+      "axis": "Y"
+    },
+    "lon": {
+      "standard_name": "longitude",
+      "units": "degrees_east",
+      "axis": "X"
+    },
+    "time": {"standard_name": "time"}
+  },
+
+  // SSH and wind stress are monthly ocean fields; bathymetry is a static
+  // (fx) field, since it's a fixed property of the model's ocean grid, not
+  // a diagnosed quantity - same reasoning fetch_cmip_data.ipynb used when
+  // it fell back to searching other experiments for a model's Ofx/deptho.
+  "varlist": {
+    "zos": {
+      "standard_name": "sea_surface_height_above_geoid",
+      "realm": "ocean",
+      "units": "m",
+      "frequency": "mon",
+      "dimensions": ["time", "lat", "lon"]
+    },
+    "tauuo": {
+      "standard_name": "surface_downward_x_stress",
+      "realm": "ocean",
+      "units": "Pa",
+      "frequency": "mon",
+      "dimensions": ["time", "lat", "lon"]
+    },
+    "tauvo": {
+      "standard_name": "surface_downward_y_stress",
+      "realm": "ocean",
+      "units": "Pa",
+      "frequency": "mon",
+      "dimensions": ["time", "lat", "lon"]
+    },
+    "deptho": {
+      "standard_name": "sea_floor_depth_below_geoid",
+      "realm": "ocean",
+      "units": "m",
+      "frequency": "fx",
+      "dimensions": ["lat", "lon"]
+    }
+  }
+}
