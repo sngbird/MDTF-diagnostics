@@ -53,9 +53,15 @@
   },
 
   // SSH and wind stress are monthly ocean fields; bathymetry is a static
-  // (fx) field, since it's a fixed property of the model's ocean grid, not
-  // a diagnosed quantity - same reasoning fetch_cmip_data.ipynb used when
-  // it fell back to searching other experiments for a model's Ofx/deptho.
+  // property of the model's ocean grid, not a diagnosed quantity - same
+  // reasoning fetch_cmip_data.ipynb used when it fell back to searching
+  // other experiments for a model's Ofx/deptho. deptho below deliberately
+  // omits "frequency" (unlike the other three) - the framework's varlist
+  // parser always reconfigures the time coordinate whenever *any*
+  // time-related key (including frequency) is present on an entry, which
+  // throws for a variable whose "dimensions" has no "time" axis to
+  // reconfigure. Leaving frequency out entirely is what actually marks
+  // this entry static; "dimensions": ["lat", "lon"] alone is not enough.
   "varlist": {
     "zos": {
       "standard_name": "sea_surface_height_above_geoid",
@@ -65,14 +71,14 @@
       "dimensions": ["time", "lat", "lon"]
     },
     "tauuo": {
-      "standard_name": "surface_downward_x_stress",
+      "standard_name": "downward_x_stress_at_sea_water_surface",
       "realm": "ocean",
       "units": "Pa",
       "frequency": "mon",
       "dimensions": ["time", "lat", "lon"]
     },
     "tauvo": {
-      "standard_name": "surface_downward_y_stress",
+      "standard_name": "downward_y_stress_at_sea_water_surface",
       "realm": "ocean",
       "units": "Pa",
       "frequency": "mon",
@@ -82,7 +88,6 @@
       "standard_name": "sea_floor_depth_below_geoid",
       "realm": "ocean",
       "units": "m",
-      "frequency": "fx",
       "dimensions": ["lat", "lon"]
     }
   }

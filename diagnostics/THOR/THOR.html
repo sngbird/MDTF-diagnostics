@@ -35,11 +35,11 @@ Extension), independent of THOR's own classification, as a visual check on
 how well the two line up.
 </p>
 <!--
-    LRP/SHAP feature-attribution plots below only exist when RUN_EXPLAIN was
-    set to "true" for this run - see doc/THOR.rst.
+    LRP/SHAP feature-attribution plots are written to $WORK_DIR/model/ when
+    RUN_EXPLAIN is enabled (see doc/THOR.rst) but are deliberately NOT linked
+    here: the framework's LinkVerifier treats every link on this page as
+    required output and deactivates the whole POD if any target is missing,
+    and its HTML templating has no conditional syntax to link a file only
+    when RUN_EXPLAIN was on. Since RUN_EXPLAIN defaults to false, linking
+    the LRP/SHAP plots unconditionally would break every default run.
 -->
-<TABLE>
-<TR>
-<TH align=left style="color:navy;">Explainability (if RUN_EXPLAIN was enabled)
-<TH align=center><A href=model/{{CASENAME}}_lrp.png>LRP - whole domain</A>
-</TABLE>
