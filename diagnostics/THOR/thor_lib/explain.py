@@ -179,28 +179,41 @@ def run_shap(X, valid_mask, lat, lon180, basin_key, model_dir, n_models, method,
     return shap_consist, in_basin
 
 
-def plot_shap(shap_consist, in_basin, regime_map, lat, lon180, basin_key, out_dir, out_prefix):
+def plot_shap(shap_consist, in_basin, regime_map, lat, lon180, basin_key, out_dir, out_prefix, ext="eps"):
+    """One figure per regime class present in the basin, 8 feature panels
+    each. Each point's SHAP value is scattered back onto the model's own
+    native grid and drawn with pcolormesh (filled grid cells), not a
+    scatter plot of small dots - at basin scale the two look similar, but
+    a tight custom window (a handful of points across) reads as mostly
+    empty space with tiny dots; filled native-resolution cells make each
+    point occupy its actual grid-cell footprint instead. A black coastline
+    (the model's own land mask, i.e. where regime_map is NaN) is drawn on
+    every panel so the separation point/coast is visible regardless of
+    zoom level."""
     b = BASIN_DEFS[basin_key]
     regime_basin = regime_map[in_basin]
     present_regimes = sorted(int(r) for r in np.unique(regime_basin[~np.isnan(regime_basin)]))
-    lat_basin = lat[in_basin]
-    lon_basin = lon180[in_basin]
+    land = np.isnan(regime_map).astype(float)
 
     for regime in present_regimes:
         mask = regime_basin == regime
         if mask.sum() < 5:
             continue
         clim = np.percentile(np.abs(shap_consist[mask, :, regime]), 95)
+        regime_mask_full = in_basin & (regime_map == regime)
+
         fig, axes = plt.subplots(2, 4, figsize=(20, 8))
         im = None
         for ax, j, name in zip(axes.flat, range(len(FEATURE_NAMES)), FEATURE_NAMES):
-            im = ax.scatter(
-                lon_basin[mask], lat_basin[mask], c=shap_consist[mask, j, regime],
-                cmap="seismic", vmin=-clim, vmax=clim, s=4,
-            )
+            field = np.full(lat.shape, np.nan)
+            field[regime_mask_full] = shap_consist[mask, j, regime]
+            im = ax.pcolormesh(lon180, lat, field, cmap="seismic", vmin=-clim, vmax=clim, shading="auto")
+            ax.contour(lon180, lat, land, levels=[0.5], colors="black", linewidths=0.6)
+            ax.set_xlim(b["lon"])
+            ax.set_ylim(b["lat"])
             ax.set_title(name)
             ax.set_aspect("equal")
         fig.suptitle(f"SHAP - {b['label']} - regime {regime}")
         fig.colorbar(im, ax=axes, fraction=0.02, pad=0.02, label="SHAP value (ensemble-consistent)")
-        plt.savefig(os.path.join(out_dir, f"{out_prefix}_shap_{basin_key}_regime{regime}.eps"), bbox_inches="tight")
+        plt.savefig(os.path.join(out_dir, f"{out_prefix}_shap_{basin_key}_regime{regime}.{ext}"), bbox_inches="tight")
         plt.close()

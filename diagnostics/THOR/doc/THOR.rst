@@ -32,16 +32,15 @@ the ensemble and computes the entropy map (``thor_lib/ensemble.py``), and
 plots both maps whole-domain and per named basin with an optional SSH-
 gradient front contour (``thor_lib/plotting.py``).
 
-If ``RUN_EXPLAIN`` is enabled, it also runs LRP (Layer-wise Relevance
-Propagation, whole domain) and SHAP (Shapley values, one basin) feature
-attribution (``thor_lib/explain.py``), answering which of the 8 input
-features drove THOR's classification at a given point. LRP is cheap (a
-single backward pass, comparable cost to the ensemble inference itself).
-SHAP's exact algorithm is not - it evaluates all 256 feature coalitions per
-sample, which is intractable over the whole ensemble/whole domain, so it
-defaults to the ``fastshap`` package's approximate ``KernelExplainer``
-(~4x faster, 0.9985 correlation to the exact algorithm on this model) and
-stays scoped to a single basin (``SHAP_BASIN``) even then. Set
+If ``RUN_EXPLAIN`` is enabled, it also runs SHAP (Shapley values, one
+basin) feature attribution (``thor_lib/explain.py``), answering which of
+the 8 input features drove THOR's classification at a given point. SHAP's
+exact algorithm evaluates all 256 feature coalitions per sample, which is
+intractable over the whole ensemble/whole domain, so it defaults to the
+``fastshap`` package's approximate ``KernelExplainer`` (~4x faster, 0.9985
+correlation to the exact algorithm on this model) and stays scoped to a
+single basin (``SHAP_BASIN``, a named basin or a user-defined custom
+window - see ``CUSTOM_BASIN_*`` in settings.jsonc) even then. Set
 ``SHAP_METHOD = "exact"`` to use the real ``shap`` package instead.
 
 Required programming language and libraries

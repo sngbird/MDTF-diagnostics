@@ -1,0 +1,19 @@
+name: _MDTF_python3_THOR
+channels:
+- conda-forge
+dependencies:
+- python=3.12
+- pip=23.3.1
+- pip:
+    - numpy
+    - scipy
+    - xarray
+    - netCDF4
+    - scikit-learn
+    - matplotlib
+    - contourpy
+    - pandas
+    - h5py
+    - tensorflow
+    - keras
+    - shap

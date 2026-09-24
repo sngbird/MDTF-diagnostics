@@ -7,10 +7,10 @@
 # both whole-domain and per named basin, with an SSH-gradient front (jet/
 # current core) contour on the basin plots.
 #
-# LRP (whole domain, cheap) and SHAP (one basin, expensive) feature-
-# attribution plots run afterward if RUN_EXPLAIN is set - see
-# thor_lib/explain.py for why SHAP defaults to an approximate method and
-# stays basin-scoped even then.
+# A SHAP (one basin, expensive) feature-attribution plot runs afterward if
+# RUN_EXPLAIN is set - see thor_lib/explain.py for why SHAP defaults to an
+# approximate method and stays basin-scoped even then, and settings.jsonc
+# for why this POD uses SHAP rather than LRP.
 #
 # See doc/THOR.rst for the underlying method (Yik et al. 2023, THOR-MOM6)
 # and references. This file is intentionally a thin orchestrator - the
@@ -43,12 +43,43 @@ BASINS = [b for b in os.environ.get("BASINS", "").split(",") if b]
 FRONT_CONTOUR = os.environ.get("FRONT_CONTOUR", "true").lower() == "true"
 FRONT_PERCENTILE = float(os.environ.get("FRONT_PERCENTILE", "90"))
 RUN_EXPLAIN = os.environ.get("RUN_EXPLAIN", "false").lower() == "true"
-SHAP_BASIN = os.environ.get("SHAP_BASIN", "na")
+SHAP_BASIN = os.environ.get("SHAP_BASIN", "custom")
 SHAP_METHOD = os.environ.get("SHAP_METHOD", "fast")
 SHAP_BACKGROUND_SIZE = int(os.environ.get("SHAP_BACKGROUND_SIZE", "100"))
-LRP_EPSILON_SCALE = float(os.environ.get("LRP_EPSILON_SCALE", "0.25"))
 N_MODELS = int(os.environ.get("N_MODELS", "50"))
 TIME_COORD = os.environ.get("time_coord", "time")
+
+# A user-defined basin window, registered into plotting.BASIN_DEFS under the
+# key "custom" - used wherever "custom" appears in BASINS, or where
+# SHAP_BASIN="custom". All four bounds are required together; left blank
+# (the settings.jsonc default) means no custom basin is defined, and using
+# "custom" in BASINS/SHAP_BASIN without them is a real configuration error,
+# not something to silently ignore.
+_custom_bounds = {
+    k: os.environ.get(f"CUSTOM_BASIN_{k}", "")
+    for k in ("LON_MIN", "LON_MAX", "LAT_MIN", "LAT_MAX")
+}
+if any(_custom_bounds.values()):
+    if not all(_custom_bounds.values()):
+        raise ValueError(
+            "CUSTOM_BASIN_LON_MIN/LON_MAX/LAT_MIN/LAT_MAX must all be set together to define a custom "
+            f"basin - got {_custom_bounds!r}"
+        )
+    _lon_min, _lon_max = float(_custom_bounds["LON_MIN"]), float(_custom_bounds["LON_MAX"])
+    _lat_min, _lat_max = float(_custom_bounds["LAT_MIN"]), float(_custom_bounds["LAT_MAX"])
+    _jet_lat_min = float(os.environ.get("CUSTOM_BASIN_JET_LAT_MIN") or _lat_min)
+    _jet_lat_max = float(os.environ.get("CUSTOM_BASIN_JET_LAT_MAX") or _lat_max)
+    plotting.BASIN_DEFS["custom"] = {
+        "label": os.environ.get("CUSTOM_BASIN_LABEL", "Custom"),
+        "lon": (_lon_min, _lon_max),
+        "lat": (_lat_min, _lat_max),
+        "jet_lat": (_jet_lat_min, _jet_lat_max),
+    }
+elif "custom" in BASINS or SHAP_BASIN == "custom":
+    raise ValueError(
+        "BASINS or SHAP_BASIN references \"custom\", but CUSTOM_BASIN_LON_MIN/LON_MAX/LAT_MIN/LAT_MAX "
+        "aren't set - see settings.jsonc"
+    )
 
 # 1) Build features from this case's staged model output ####################
 #
@@ -98,7 +129,8 @@ if BASINS:
         regime_map, lat, lon180, BASINS, "THOR regimes",
         os.path.join(PS_DIR, f"{CASENAME}_basins.eps"),
         cmap=plotting.REGIME_CMAP, vmin=0, vmax=5, cbar_label="THOR regime class",
-        ssh_grad_mag=ssh_grad_mag, front_contour=FRONT_CONTOUR, front_percentile=FRONT_PERCENTILE,
+        front_field=ssh_grad_mag, front_field_label="SSH gradient",
+        front_contour=FRONT_CONTOUR, front_percentiles=(FRONT_PERCENTILE,),
     )
     plotting.plot_basins(
         entropy_map, lat, lon180, BASINS, "THOR ensemble entropy",
@@ -111,10 +143,6 @@ else:
 # 4) Explainability (optional, expensive) ####################################
 if RUN_EXPLAIN:
     from thor_lib import explain
-
-    print("THOR: RUN_EXPLAIN is on - running LRP (whole domain)")
-    lrp_consist = explain.run_lrp(X, MODEL_DIR, N_MODELS, LRP_EPSILON_SCALE)
-    explain.plot_lrp(lrp_consist, valid_mask, lat, lon180, os.path.join(PS_DIR, f"{CASENAME}_lrp.eps"))
 
     print(f"THOR: RUN_EXPLAIN is on - running SHAP (method={SHAP_METHOD!r}, basin={SHAP_BASIN!r})")
     shap_consist, in_basin = explain.run_shap(

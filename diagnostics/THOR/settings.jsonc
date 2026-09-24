@@ -6,8 +6,18 @@
 // from SSH, wind stress, and bathymetry. This POD builds those features
 // from the case's staged model output, runs the ensemble, and plots the
 // resulting regime map plus a per-point prediction-entropy (confidence)
-// map. LRP/SHAP feature-attribution plots are available as an optional,
-// off-by-default stage (RUN_EXPLAIN) since SHAP is expensive.
+// map. A SHAP feature-attribution plot is available as an optional,
+// off-by-default stage (RUN_EXPLAIN).
+//
+// SHAP, not LRP: this POD's deliverable scope only needs one
+// explainability method, not both (LRP is cheap but coarser; SHAP is more
+// rigorous but expensive at basin scale - see thor_lib/explain.py). Direct
+// timing on this model: the full "ke" basin (~8,300 points) is ~14 min for
+// the 50-model ensemble; the default custom window below (~900-3,000
+// points depending on the model's resolution) is under 6 min even on
+// GFDL-ESM4's finer grid, ~2 min on CESM2's coarser one. So SHAP is
+// practical here as long as SHAP_BASIN points at a custom window (see
+// CUSTOM_BASIN_* below) rather than one of the large named basins.
 {
   "settings": {
     "driver": "THOR.py",
@@ -19,17 +29,40 @@
     // driver - mirrors the config-cell levers the original notebooks
     // exposed (BASINS, FRONT_PERCENTILE, SHAP_METHOD, ...).
     "pod_env_vars": {
-      "BASINS": "na,ke",           // comma-separated basin keys to plot, or "" for whole-domain only
+      "BASINS": "na,ke,custom",    // comma-separated basin keys to plot, or "" for whole-domain only.
+                                    // "na"/"ke" are the built-in named basins; "custom" is the
+                                    // user-defined window below (defaults to the Kuroshio separation
+                                    // zone, but can be pointed anywhere)
+
       "FRONT_CONTOUR": "true",     // outline the jet/front from the SSH gradient on basin plots
       "FRONT_PERCENTILE": "90",    // contour the steepest (100 - this)% of SSH gradient within each basin
-      "RUN_EXPLAIN": "false",      // also run LRP (whole domain) + SHAP (one basin) - LRP is cheap,
-                                    // SHAP is not (see thor_lib/explain.py) - off by default
-      "SHAP_BASIN": "na",          // basin SHAP is scoped to, when RUN_EXPLAIN is on
+
+      // Custom basin window - used wherever "custom" appears in BASINS
+      // and/or SHAP_BASIN is set to "custom" (both true by default below).
+      // All four bounds are required together if you override them - clear
+      // all four to disable the custom basin entirely. Longitude in
+      // -180..180. Default: the Kuroshio separation point plus the
+      // immediate recirculation/meander zone downstream (not the whole KE
+      // basin) - timed directly at ~900-3,000 points depending on the
+      // model's resolution, a few minutes at most for the full 50-model
+      // SHAP ensemble (see the note above BASINS' comment block).
+      "CUSTOM_BASIN_LON_MIN": "130", // west edge of the custom window
+      "CUSTOM_BASIN_LON_MAX": "165", // east edge
+      "CUSTOM_BASIN_LAT_MIN": "25",  // south edge
+      "CUSTOM_BASIN_LAT_MAX": "45",  // north edge
+      "CUSTOM_BASIN_LABEL": "Kuroshio separation zone", // display name used in plot titles/legends
+      "CUSTOM_BASIN_JET_LAT_MIN": "", // optional narrower jet-core band for the SSH-isoline method -
+      "CUSTOM_BASIN_JET_LAT_MAX": "", // defaults to the full custom window's lat range if left blank
+
+      "RUN_EXPLAIN": "false",      // also run SHAP (one basin) - off by default; when on, defaults to
+                                    // the custom window above, which stays fast even at full ensemble size
+      "SHAP_BASIN": "custom",      // basin SHAP is scoped to, when RUN_EXPLAIN is on - "na", "ke", or
+                                    // "custom" (see CUSTOM_BASIN_* above). Defaults to "custom" since
+                                    // the named basins are impractically slow for SHAP (~14 min for "ke")
       "SHAP_METHOD": "fast",       // "fast" (fastshap, approximate, ~4x faster) or "exact" (shap package)
       "SHAP_BACKGROUND_SIZE": "100", // random subsample of the domain used as SHAP's background -
                                       // memory/time scale with this x basin points x coalitions, so
                                       // keep it small (a few hundred) even on fine-resolution grids
-      "LRP_EPSILON_SCALE": "0.25", // LRP epsilon-rule stabilizer, as a fraction of each layer's z-std
       "N_MODELS": "50"             // how many of the 50 ensemble members to use (fewer = faster, less stable)
     },
 
@@ -53,9 +86,15 @@
   },
 
   // SSH and wind stress are monthly ocean fields; bathymetry is a static
-  // (fx) field, since it's a fixed property of the model's ocean grid, not
-  // a diagnosed quantity - same reasoning fetch_cmip_data.ipynb used when
-  // it fell back to searching other experiments for a model's Ofx/deptho.
+  // property of the model's ocean grid, not a diagnosed quantity - same
+  // reasoning fetch_cmip_data.ipynb used when it fell back to searching
+  // other experiments for a model's Ofx/deptho. deptho below deliberately
+  // omits "frequency" (unlike the other three) - the framework's varlist
+  // parser always reconfigures the time coordinate whenever *any*
+  // time-related key (including frequency) is present on an entry, which
+  // throws for a variable whose "dimensions" has no "time" axis to
+  // reconfigure. Leaving frequency out entirely is what actually marks
+  // this entry static; "dimensions": ["lat", "lon"] alone is not enough.
   "varlist": {
     "zos": {
       "standard_name": "sea_surface_height_above_geoid",
@@ -65,14 +104,14 @@
       "dimensions": ["time", "lat", "lon"]
     },
     "tauuo": {
-      "standard_name": "surface_downward_x_stress",
+      "standard_name": "downward_x_stress_at_sea_water_surface",
       "realm": "ocean",
       "units": "Pa",
       "frequency": "mon",
       "dimensions": ["time", "lat", "lon"]
     },
     "tauvo": {
-      "standard_name": "surface_downward_y_stress",
+      "standard_name": "downward_y_stress_at_sea_water_surface",
       "realm": "ocean",
       "units": "Pa",
       "frequency": "mon",
@@ -82,7 +121,6 @@
       "standard_name": "sea_floor_depth_below_geoid",
       "realm": "ocean",
       "units": "m",
-      "frequency": "fx",
       "dimensions": ["lat", "lon"]
     }
   }
