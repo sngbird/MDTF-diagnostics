@@ -19,7 +19,6 @@ from matplotlib import pyplot as plt
 from keras.models import Model
 from keras.layers import Dense
 import shap
-import fastshap
 
 from . import ensemble
 from .plotting import BASIN_DEFS, true_aspect
@@ -33,6 +32,40 @@ FEATURE_NAMES = [
     "curl_tau", "ssh", "grad_ssh_x", "grad_ssh_y",
     "depth", "grad_depth_x", "grad_depth_y", "coriolis_f",
 ]
+
+# fastshap seconds per ensemble member ~= FIXED + points * (PER_POINT + PER_POINT_PER_BG * background),
+# fitted to timings on a desktop CPU (GFDL-ESM4 features, 1,000-4,000 points, background 50-1,600).
+# Reproduces the full 50-member runs within ~10%: 1,933 points 3.7 min, 8,282 points 14 min,
+# 32,721 points 53 min, all at background 100.
+_SEC_FIXED_PER_MEMBER = 0.68
+_SEC_PER_POINT = 1.74e-3
+_SEC_PER_POINT_PER_BG = 3.1e-6
+_EXACT_SLOWDOWN = 4.0
+_DEFAULT_BACKGROUND = 100
+_WARN_MINUTES = 20
+
+
+def estimate_shap_minutes(n_points, background_size, n_models, method="fast"):
+    per_member = _SEC_FIXED_PER_MEMBER + n_points * (_SEC_PER_POINT + _SEC_PER_POINT_PER_BG * background_size)
+    minutes = per_member * n_models / 60
+    return minutes * (_EXACT_SLOWDOWN if method == "exact" else 1.0)
+
+
+def _report_shap_cost(label, n_points, background_size, n_models, method):
+    est = estimate_shap_minutes(n_points, background_size, n_models, method)
+    print(f"SHAP estimated runtime: ~{est:.0f} min ({n_points} window points, background {background_size}, "
+          f"{n_models} members, method {method!r}; desktop-CPU timing, scale for your hardware)")
+    if est < _WARN_MINUTES and background_size <= _DEFAULT_BACKGROUND:
+        return
+    default_est = estimate_shap_minutes(n_points, _DEFAULT_BACKGROUND, n_models, method)
+    print("=" * 78)
+    print(f"WARNING: this SHAP run is estimated at ~{est:.0f} min over {label!r}.")
+    print(f"  Window: {n_points} ocean points. Runtime grows ~0.1 s per point across 50 members.")
+    if background_size > _DEFAULT_BACKGROUND:
+        print(f"  Background {background_size} vs default {_DEFAULT_BACKGROUND}: "
+              f"~{est / default_est:.1f}x the default runtime (~{default_est:.0f} min) and more memory.")
+    print("  To cut it, shrink CUSTOM_BASIN_* or lower SHAP_BACKGROUND_SIZE in settings.jsonc.")
+    print("=" * 78)
 
 
 def _get_activations_and_weights(model, X_batch):
@@ -114,6 +147,16 @@ def _run_shap_one_model(model, background, data, method, fastshap_n_coalition_si
         shap_info = explainer(data)
         return shap_info.values, shap_info.base_values
     elif method == "fast":
+        try:
+            import fastshap
+        except ImportError as e:
+            raise ImportError(
+                "SHAP_METHOD='fast' needs the fastshap package, which the THOR environment file leaves out "
+                "because its metadata still depends on the deprecated 'sklearn' PyPI alias. Install it into "
+                "_MDTF_python3_THOR with: SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True pip install "
+                "fastshap==0.3.1 - or set SHAP_METHOD='exact' in settings.jsonc."
+            ) from e
+
         def model_fn(X_batch):
             return model.predict(X_batch, verbose=0, batch_size=8192)
         explainer = fastshap.KernelExplainer(model_fn, background)
@@ -153,6 +196,7 @@ def run_shap(X, valid_mask, lat, lon180, basin_key, model_dir, n_models, method,
         background = X
     print(f"SHAP scope: {b['label']!r} - {len(X_basin)} points, "
           f"background={len(background)} points, method={method!r}")
+    _report_shap_cost(b["label"], len(X_basin), len(background), n_models, method)
 
     shap_vals_list, shap_base_list = [], []
     for m in range(n_models):
@@ -179,28 +223,41 @@ def run_shap(X, valid_mask, lat, lon180, basin_key, model_dir, n_models, method,
     return shap_consist, in_basin
 
 
-def plot_shap(shap_consist, in_basin, regime_map, lat, lon180, basin_key, out_dir, out_prefix):
+def plot_shap(shap_consist, in_basin, regime_map, lat, lon180, basin_key, out_dir, out_prefix, ext="eps"):
+    """One figure per regime class present in the basin, 8 feature panels
+    each. Each point's SHAP value is scattered back onto the model's own
+    native grid and drawn with pcolormesh (filled grid cells), not a
+    scatter plot of small dots - at basin scale the two look similar, but
+    a tight custom window (a handful of points across) reads as mostly
+    empty space with tiny dots; filled native-resolution cells make each
+    point occupy its actual grid-cell footprint instead. A black coastline
+    (the model's own land mask, i.e. where regime_map is NaN) is drawn on
+    every panel so the separation point/coast is visible regardless of
+    zoom level."""
     b = BASIN_DEFS[basin_key]
     regime_basin = regime_map[in_basin]
     present_regimes = sorted(int(r) for r in np.unique(regime_basin[~np.isnan(regime_basin)]))
-    lat_basin = lat[in_basin]
-    lon_basin = lon180[in_basin]
+    land = np.isnan(regime_map).astype(float)
 
     for regime in present_regimes:
         mask = regime_basin == regime
         if mask.sum() < 5:
             continue
         clim = np.percentile(np.abs(shap_consist[mask, :, regime]), 95)
+        regime_mask_full = in_basin & (regime_map == regime)
+
         fig, axes = plt.subplots(2, 4, figsize=(20, 8))
         im = None
         for ax, j, name in zip(axes.flat, range(len(FEATURE_NAMES)), FEATURE_NAMES):
-            im = ax.scatter(
-                lon_basin[mask], lat_basin[mask], c=shap_consist[mask, j, regime],
-                cmap="seismic", vmin=-clim, vmax=clim, s=4,
-            )
+            field = np.full(lat.shape, np.nan)
+            field[regime_mask_full] = shap_consist[mask, j, regime]
+            im = ax.pcolormesh(lon180, lat, field, cmap="seismic", vmin=-clim, vmax=clim, shading="auto")
+            ax.contour(lon180, lat, land, levels=[0.5], colors="black", linewidths=0.6)
+            ax.set_xlim(b["lon"])
+            ax.set_ylim(b["lat"])
             ax.set_title(name)
             ax.set_aspect("equal")
         fig.suptitle(f"SHAP - {b['label']} - regime {regime}")
         fig.colorbar(im, ax=axes, fraction=0.02, pad=0.02, label="SHAP value (ensemble-consistent)")
-        plt.savefig(os.path.join(out_dir, f"{out_prefix}_shap_{basin_key}_regime{regime}.eps"), bbox_inches="tight")
+        plt.savefig(os.path.join(out_dir, f"{out_prefix}_shap_{basin_key}_regime{regime}.{ext}"), bbox_inches="tight")
         plt.close()

@@ -1,0 +1,28 @@
+name: _MDTF_python3_THOR
+# Environment for the THOR POD. Versions are pinned to the environment the POD
+# was validated in (GFDL-ESM4 and CESM2, Sep 2026). Keep this list in step with
+# runtime_requirements in diagnostics/THOR/settings.jsonc, and keep
+# env_python3_THOR.yml and env_python3_THOR_micromamba.yml identical.
+#
+# fastshap is left out: its metadata still depends on the deprecated "sklearn"
+# PyPI alias, which refuses to install. It's needed only for RUN_EXPLAIN with
+# SHAP_METHOD="fast"; add it after building this env with:
+#   SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True pip install fastshap==0.3.1
+channels:
+- conda-forge
+dependencies:
+- python=3.12
+- pip=23.3.1
+- pip:
+    - numpy==2.5.2
+    - scipy==1.18.1
+    - xarray==2026.7.0
+    - netCDF4==1.7.4
+    - h5py==3.14.0
+    - scikit-learn==1.9.0
+    - matplotlib==3.11.1
+    - contourpy==1.3.3
+    - pandas==3.0.5
+    - tensorflow==2.21.0
+    - keras==3.15.1
+    - shap==0.52.0
