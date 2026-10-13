@@ -30,7 +30,10 @@ Functionality
 bathymetry, builds the 8-feature matrix (``thor_lib/features.py``), runs
 the ensemble and computes the entropy map (``thor_lib/ensemble.py``), and
 plots both maps whole-domain and per named basin with an optional SSH-
-gradient front contour (``thor_lib/plotting.py``).
+gradient front contour (``thor_lib/plotting.py``). It then compares the
+case's regime map against a shipped observational THOR reference
+(``thor_lib/obs_compare.py`` - see below), unless ``RUN_OBS_COMPARE`` is
+disabled.
 
 If ``RUN_EXPLAIN`` is enabled, it also runs SHAP (Shapley values, one
 basin) feature attribution (``thor_lib/explain.py``), answering which of
@@ -43,12 +46,40 @@ single basin (``SHAP_BASIN``, a named basin or a user-defined custom
 window - see ``CUSTOM_BASIN_*`` in settings.jsonc) even then. Set
 ``SHAP_METHOD = "exact"`` to use the real ``shap`` package instead.
 
+SHAP's runtime grows in proportion to the number of ocean grid points in
+that window (about 0.1 s per point for the 50-member ensemble, so ~6 min for
+the default window on GFDL-ESM4 and ~21 min on the finer GFDL-CM4) and, more
+slowly, with ``SHAP_BACKGROUND_SIZE`` (roughly 0.85 + 0.0015 × background
+relative to the default of 100). settings.jsonc lists per-model costs, and
+the POD logs an estimate, with a warning for long runs, before SHAP starts.
+
+Unless ``RUN_OBS_COMPARE`` is disabled, the case's regime map is also
+compared cell-by-cell against a shipped observational THOR reference
+(``thor_lib/obs_compare.py``): THOR run on DUACS altimetry SSH and
+scatterometer wind stress (ETOPO1 bathymetry), 2000-2014, on the same 0.5 deg
+grid THOR was trained on (ECCO). That reference was built outside this POD
+by the standalone ``THOR/obs_thor.py`` pipeline (it needs an external ERDDAP
+fetch this POD's runtime environment has no access to) and ships as a small
+digested file, ``obs_data/obs_scat_thor.npz``. The case's own regime map
+stays on its native grid; agreement is computed by nearest-neighbor-matching
+it onto the observational grid, reported globally and per basin in
+``BASINS`` (``<CASENAME>_obs_compare_stats.txt``), alongside an obs-vs-case
+regime map per basin (``<CASENAME>_obs_compare_<basin>.eps``). Since the
+reference only spans 2000-2014, treat this comparison as informative mainly
+for historical-like forcing, not an idealized/future scenario such as
+1pctCO2 or abrupt-4xCO2.
+
 Required programming language and libraries
 --------------------------------------------
 
-Python 3, with ``numpy``, ``xarray``, ``scikit-learn``, ``matplotlib``,
-``tensorflow``/``keras``, and (only when ``RUN_EXPLAIN`` is enabled)
-``shap`` and ``fastshap``.
+Python 3.12, with ``numpy``, ``scipy``, ``xarray``, ``netCDF4``, ``h5py``,
+``scikit-learn``, ``matplotlib``, ``contourpy``, ``tensorflow``/``keras``,
+and (only when ``RUN_EXPLAIN`` is enabled) ``shap`` and ``fastshap``. THOR
+builds its own environment, ``_MDTF_python3_THOR``, from
+``src/conda/env_python3_THOR.yml`` (or ``env_python3_THOR_micromamba.yml``),
+with versions pinned to the ones the POD was validated with. ``fastshap`` is
+installed separately (see doc/running_locally.md), since its package
+metadata depends on the deprecated ``sklearn`` PyPI alias.
 
 Required model output variables
 ---------------------------------

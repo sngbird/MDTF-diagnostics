@@ -9,12 +9,41 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from scipy.spatial import cKDTree
 
 # Okabe-Ito colorblind-safe palette (Okabe & Ito, 2008) - chosen over the
 # original saturated royalblue/cyan/yellow/orange/magenta/red set for being
 # both easier on the eyes and accessible to color-vision-deficient viewers.
 REGIME_CMAP = ListedColormap(["#0072B2", "#E69F00", "#009E73", "#D55E00", "#56B4E9", "#CC79A7"])
+NODATA_COLOR = "#C8C8C8"  # ocean with no data: distinct from white land and from every regime color
+
+# THOR's 6 class IDs (0-5, from the k-means fit in Step1_THOR.ipynb, an
+# arbitrary sklearn cluster-label order) mapped to the named regimes from
+# Sonnewald & Lguensat 2021 (the actual THOR origin paper - JAMES,
+# 10.1029/2021MS002496; NOT the 2019 Sonnewald/Wunsch/Heimbach paper, which
+# uses a different, globally-scoped 50-cluster reduction and doesn't use
+# these abbreviations at all). This mapping isn't stored anywhere in the
+# codebase - it was determined empirically by cross-referencing this
+# project's own Step1/Data_Step1 budget-term arrays (curlA, curlB, curlTau,
+# curlCori, BPT) and kCluster6.npy against the paper's per-regime
+# descriptions, on three independent, mutually-consistent lines of evidence:
+#   - term magnitude: class 0 is the only class with uniformly small
+#     |value| across all 5 terms, matching "MD...vorticity inputs...of much
+#     smaller magnitude than the other regimes" (paper Section 2.1)
+#   - term sign: e.g. class 2's mean curlTau is negative and curlCori
+#     positive, matching N-SV's "wind...largely negative, and...advection
+#     is positive" exactly (paper Section 2.1)
+#   - geography: class 4 is 64% concentrated south of 60S (mean lat -55.75)
+#     - unmistakably SO (Southern Ocean/ACC); within the North Atlantic box
+#     specifically, class 2/1/3's latitude bands (subtropical ~25-33N,
+#     wider spanning band, subpolar ~48-58N respectively) match the paper's
+#     N-SV/S-SV/TR geography (Figure 2c)
+# class 5 = NL (Nonlinear) was already known: Step1_THOR.ipynb explicitly
+# merges the 45 least-common of the original 50 k-means clusters into this
+# one label, matching the paper's "NL...made up of a collection of smaller
+# regimes that all have a large nonlinear torque component."
+REGIME_LABELS = ["MD", "S-SV", "N-SV", "TR", "SO", "NL"]
 
 # lon bounds are in -180..180 (normalized regardless of source convention).
 # jet_lat is the narrower core band the jet/current itself is expected to sit
@@ -152,7 +181,7 @@ def _draw_basin_panel(
     front_percentiles=(75, 85, 90, 95),
     front_lat=None, front_lon180=None,
     front_u=None, front_v=None, quiver_stride=3, quiver_scale=3,
-    ssh_field=None,
+    ssh_field=None, tick_labels=None, land_outline=True, land_mask=None, nodata_mask=None,
 ):
     """Draw one basin's field (plus optional front overlay) into `ax`. Shared
     by plot_basins() (one row of these, one per basin, same field) and
@@ -191,7 +220,20 @@ def _draw_basin_panel(
     alongside front_field's. This is closer to how altimetry-based papers
     actually locate a jet (one physically anchored SSH contour) than
     thresholding gradient magnitude is - kept as an addition rather than a
-    replacement since both are informative in different ways."""
+    replacement since both are informative in different ways.
+
+    tick_labels (optional): discrete category names (e.g. REGIME_LABELS),
+    one per integer value from vmin to vmax - replaces the colorbar's plain
+    numeric scale with these, so a regime-class map is self-labeled without
+    needing a separate key.
+
+    land_outline: draw a black line around land. Land is the field's own
+    NaN cells unless land_mask (boolean, True = land, same grid) is given -
+    pass one when the field is also NaN over ocean it has no data for (e.g.
+    the observations under sea ice), so that isn't outlined as coast.
+
+    nodata_mask (boolean, same grid): ocean cells with no data, shaded light
+    gray and added to the legend, so they read as neither land nor data."""
     b = BASIN_DEFS[key]
     in_basin = (
         (lon180 >= b["lon"][0]) & (lon180 <= b["lon"][1])
@@ -199,6 +241,23 @@ def _draw_basin_panel(
     )
     sub = np.where(in_basin, field, np.nan)
     im = ax.pcolormesh(lon180, lat, sub, cmap=cmap, vmin=vmin, vmax=vmax, shading="auto")
+    shade_nodata = nodata_mask is not None and bool((np.asarray(nodata_mask, dtype=bool) & in_basin).any())
+    if shade_nodata:
+        ax.pcolormesh(
+            lon180, lat, np.where(np.asarray(nodata_mask, dtype=bool) & in_basin, 1.0, np.nan),
+            cmap=ListedColormap([NODATA_COLOR]), shading="auto",
+        )
+    if land_outline:
+        # Traced from the unclipped mask so the basin box's own edge isn't
+        # outlined, but only within 2 deg of the box: the line still runs
+        # off the axes, while a grid seam or the +-180 wrap elsewhere on the
+        # globe can't draw a stray line through the panel.
+        land = ~np.isfinite(field) if land_mask is None else np.asarray(land_mask, dtype=bool)
+        near = (
+            (lon180 >= b["lon"][0] - 2) & (lon180 <= b["lon"][1] + 2)
+            & (lat >= b["lat"][0] - 2) & (lat <= b["lat"][1] + 2)
+        )
+        ax.contour(lon180, lat, np.where(near, land.astype(float), np.nan), levels=[0.5], colors="black", linewidths=0.8)
 
     f_lat = lat if front_lat is None else front_lat
     f_lon180 = lon180 if front_lon180 is None else front_lon180
@@ -208,6 +267,8 @@ def _draw_basin_panel(
     )
 
     legend_handles = []
+    if shade_nodata:
+        legend_handles.append(Patch(facecolor=NODATA_COLOR, edgecolor="none", label="ocean, no data"))
 
     if front_contour and front_field is not None:
         local_field = np.where(in_basin_front, front_field, np.nan)
@@ -271,7 +332,11 @@ def _draw_basin_panel(
     ax.set_ylabel("Latitude")
     ax.set_title(title)
     cbar = plt.colorbar(im, ax=ax, fraction=0.03)
-    cbar.set_label(cbar_label)
+    if tick_labels is not None:
+        cbar.set_ticks(range(len(tick_labels)))
+        cbar.set_ticklabels(tick_labels)
+    else:
+        cbar.set_label(cbar_label)
 
 
 def plot_basins(
@@ -280,11 +345,20 @@ def plot_basins(
     front_percentiles=(75, 85, 90, 95),
     front_lat=None, front_lon180=None,
     front_u=None, front_v=None, quiver_stride=3, quiver_scale=3,
-    ssh_field=None,
+    ssh_field=None, tick_labels=None, chrome=0.45, land_outline=True, land_mask=None, nodata_mask=None,
 ):
     """One row of _draw_basin_panel(), one panel per basin, all showing the
-    same field. See _draw_basin_panel() for what each parameter does."""
-    fig, axes = plt.subplots(1, len(basins), figsize=_basin_figsize(basins), constrained_layout=True)
+    same field. See _draw_basin_panel() for what each parameter does.
+
+    chrome defaults much lower than _basin_figsize's own 2.2 default -
+    unlike plot_multi_basin/plot_model_scenario_grid, this function never
+    adds a fig.suptitle() (each panel's own subplot title is the only
+    title), so reserving suptitle-sized vertical chrome here just left a
+    blank gap above the title for constrained_layout to not fill. 0.45 was
+    tuned empirically against this function's actual chrome (one title
+    line, xlabel, ticks) - tighter than that starts risking the axes
+    shrinking to protect the reserved chrome instead of the gap closing."""
+    fig, axes = plt.subplots(1, len(basins), figsize=_basin_figsize(basins, chrome=chrome), constrained_layout=True)
     if len(basins) == 1:
         axes = [axes]
 
@@ -298,7 +372,8 @@ def plot_basins(
             front_lat=front_lat, front_lon180=front_lon180,
             front_u=front_u, front_v=front_v,
             quiver_stride=quiver_stride, quiver_scale=quiver_scale,
-            ssh_field=ssh_field,
+            ssh_field=ssh_field, tick_labels=tick_labels,
+            land_outline=land_outline, land_mask=land_mask, nodata_mask=nodata_mask,
         )
 
     # no bbox_inches="tight" - it fights with constrained_layout (the two
@@ -339,7 +414,9 @@ def plot_obs_vs_sim_basin(basin_key, obs, sim, out_path):
             front_lat=panel.get("front_lat"), front_lon180=panel.get("front_lon180"),
             front_u=panel.get("u"), front_v=panel.get("v"),
             quiver_stride=panel.get("quiver_stride", 3), quiver_scale=panel.get("quiver_scale", 3),
-            ssh_field=panel.get("ssh_field"),
+            ssh_field=panel.get("ssh_field"), tick_labels=panel.get("tick_labels"),
+            land_outline=panel.get("land_outline", True), land_mask=panel.get("land_mask"),
+            nodata_mask=panel.get("nodata_mask"),
         )
 
     fig.suptitle(f"Observed altimetry vs. simulated - {b['label']}")
@@ -347,7 +424,7 @@ def plot_obs_vs_sim_basin(basin_key, obs, sim, out_path):
     plt.close()
 
 
-def plot_multi_basin(basin_key, panels, title, out_path):
+def plot_multi_basin(basin_key, panels, title, out_path, chrome=2.2):
     """Side-by-side comparison of len(panels) basin panels - the N-panel
     generalization of plot_obs_vs_sim_basin's fixed 2 (obs, sim), for an
     intermodel comparison (one panel per model) instead. Each entry in
@@ -358,7 +435,7 @@ def plot_multi_basin(basin_key, panels, title, out_path):
     maps) since nothing here is specific to what's being compared."""
     b = BASIN_DEFS[basin_key]
     fig, axes = plt.subplots(
-        1, len(panels), figsize=_basin_figsize([basin_key] * len(panels)), constrained_layout=True,
+        1, len(panels), figsize=_basin_figsize([basin_key] * len(panels), chrome=chrome), constrained_layout=True,
     )
     if len(panels) == 1:
         axes = [axes]
@@ -375,7 +452,9 @@ def plot_multi_basin(basin_key, panels, title, out_path):
             front_lat=panel.get("front_lat"), front_lon180=panel.get("front_lon180"),
             front_u=panel.get("u"), front_v=panel.get("v"),
             quiver_stride=panel.get("quiver_stride", 3), quiver_scale=panel.get("quiver_scale", 3),
-            ssh_field=panel.get("ssh_field"),
+            ssh_field=panel.get("ssh_field"), tick_labels=panel.get("tick_labels"),
+            land_outline=panel.get("land_outline", True), land_mask=panel.get("land_mask"),
+            nodata_mask=panel.get("nodata_mask"),
         )
 
     fig.suptitle(title)
@@ -417,7 +496,9 @@ def plot_model_scenario_grid(basin_key, grid_panels, title, out_path, panel_widt
                 front_lat=panel.get("front_lat"), front_lon180=panel.get("front_lon180"),
                 front_u=panel.get("u"), front_v=panel.get("v"),
                 quiver_stride=panel.get("quiver_stride", 3), quiver_scale=panel.get("quiver_scale", 3),
-                ssh_field=panel.get("ssh_field"),
+                ssh_field=panel.get("ssh_field"), tick_labels=panel.get("tick_labels"),
+                land_outline=panel.get("land_outline", True), land_mask=panel.get("land_mask"),
+                nodata_mask=panel.get("nodata_mask"),
             )
 
     fig.suptitle(title)

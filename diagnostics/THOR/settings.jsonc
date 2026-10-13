@@ -11,13 +11,11 @@
 //
 // SHAP, not LRP: this POD's deliverable scope only needs one
 // explainability method, not both (LRP is cheap but coarser; SHAP is more
-// rigorous but expensive at basin scale - see thor_lib/explain.py). Direct
-// timing on this model: the full "ke" basin (~8,300 points) is ~14 min for
-// the 50-model ensemble; the default custom window below (~900-3,000
-// points depending on the model's resolution) is under 6 min even on
-// GFDL-ESM4's finer grid, ~2 min on CESM2's coarser one. So SHAP is
-// practical here as long as SHAP_BASIN points at a custom window (see
-// CUSTOM_BASIN_* below) rather than one of the large named basins.
+// rigorous but expensive - see thor_lib/explain.py). SHAP's two cost
+// controls are the window it explains (CUSTOM_BASIN_*) and its background
+// sample size (SHAP_BACKGROUND_SIZE). Read the RUNTIME warnings above those
+// settings before raising either. The POD also logs an estimated runtime
+// for the chosen settings before SHAP starts.
 {
   "settings": {
     "driver": "THOR.py",
@@ -43,9 +41,20 @@
       // all four to disable the custom basin entirely. Longitude in
       // -180..180. Default: the Kuroshio separation point plus the
       // immediate recirculation/meander zone downstream (not the whole KE
-      // basin) - timed directly at ~900-3,000 points depending on the
-      // model's resolution, a few minutes at most for the full 50-model
-      // SHAP ensemble (see the note above BASINS' comment block).
+      // basin).
+      //
+      // WARNING - RUNTIME. This is also SHAP's window, and SHAP runtime grows
+      // in direct proportion to the number of ocean grid points inside it:
+      // about 0.1 s per point for the 50-member ensemble (~1.7 min per 1,000
+      // points). Doubling both the width and the height of the window
+      // quadruples the runtime, and finer models pack many more points into
+      // the same box. 50-member runtimes at the default background of 100
+      // (desktop CPU, measured runs plus a fit to them):
+      //                    default window (here)    full "ke" box
+      //   GFDL-CM4  0.25°  12,221 pts   ~21 min     32,721 pts   ~55 min
+      //   GFDL-ESM4 0.5°    3,063 pts    ~6 min      8,282 pts   ~14 min
+      //   CESM2     ~1°       879 pts    ~2 min      2,691 pts    ~5 min
+      //   NEMO      ~1°       748 pts    ~2 min      1,933 pts    ~4 min
       "CUSTOM_BASIN_LON_MIN": "130", // west edge of the custom window
       "CUSTOM_BASIN_LON_MAX": "165", // east edge
       "CUSTOM_BASIN_LAT_MIN": "25",  // south edge
@@ -58,16 +67,42 @@
                                     // the custom window above, which stays fast even at full ensemble size
       "SHAP_BASIN": "custom",      // basin SHAP is scoped to, when RUN_EXPLAIN is on - "na", "ke", or
                                     // "custom" (see CUSTOM_BASIN_* above). Defaults to "custom" since
-                                    // the named basins are impractically slow for SHAP (~14 min for "ke")
-      "SHAP_METHOD": "fast",       // "fast" (fastshap, approximate, ~4x faster) or "exact" (shap package)
-      "SHAP_BACKGROUND_SIZE": "100", // random subsample of the domain used as SHAP's background -
-                                      // memory/time scale with this x basin points x coalitions, so
-                                      // keep it small (a few hundred) even on fine-resolution grids
-      "N_MODELS": "50"             // how many of the 50 ensemble members to use (fewer = faster, less stable)
+                                    // the named basins are slow for SHAP ("ke": ~14 min on GFDL-ESM4,
+                                    // ~55 min on GFDL-CM4)
+      "SHAP_METHOD": "fast",       // "fast" (fastshap, approximate) or "exact" (shap package, roughly 4x slower)
+
+      // WARNING - RUNTIME AND MEMORY. SHAP_BACKGROUND_SIZE is how many
+      // reference grid points (a random sample of the whole domain) each
+      // explained point is compared against. A larger background gives a
+      // steadier baseline but costs more. Runtime relative to the default of
+      // 100 is roughly 0.85 + 0.0015 x background: 400 -> 1.45x, 800 -> ~2x,
+      // 1,600 -> ~3.3x, 3,200 -> ~6x (measured at 1,000-2,000 points). This
+      // multiplies the window cost above, so a large background on a large
+      // window compounds: GFDL-CM4's full "ke" box at 1,000 is ~2 h 15 min.
+      // Memory also grows with background x window points; using the whole
+      // domain as background once requested over 1 TB on a fine grid.
+      "SHAP_BACKGROUND_SIZE": "100",
+      "N_MODELS": "50",            // how many of the 50 ensemble members to use (runtime scales in
+                                    // proportion; fewer = faster but a less stable sign-agreement filter)
+
+      // Compares the case's regime map against a shipped observational THOR
+      // reference (DUACS altimetry SSH + scatterometer wind stress,
+      // 2000-2014 - see thor_lib/obs_compare.py), cell by cell. Cheap (one
+      // nearest-neighbor match plus a plot per basin in BASINS), on by
+      // default. The reference spans 2000-2014, so treat this comparison as
+      // informative mainly for historical-like forcing, not 1pctCO2/
+      // abrupt-4xCO2.
+      "RUN_OBS_COMPARE": "true",
+      "OBS_SOURCE": "scat"         // which shipped observational reference to use - only "scat" ships
+                                    // today (obs_data/obs_scat_thor.npz)
     },
 
+    // THOR builds its own environment, _MDTF_python3_THOR, from
+    // src/conda/env_python3_THOR.yml (conda) or env_python3_THOR_micromamba.yml
+    // (micromamba); keep this list in step with those files. shap and fastshap
+    // are needed only when RUN_EXPLAIN is on, so they aren't listed here.
     "runtime_requirements": {
-      "python3": ["numpy", "xarray", "scikit-learn", "matplotlib", "tensorflow", "keras"]
+      "python3": ["numpy", "scipy", "xarray", "netCDF4", "h5py", "scikit-learn", "matplotlib", "contourpy", "tensorflow", "keras"]
     }
   },
 

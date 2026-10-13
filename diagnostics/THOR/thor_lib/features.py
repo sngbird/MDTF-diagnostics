@@ -32,18 +32,73 @@ def find_coord_var(ds, candidates, kind):
     )
 
 
-def _grid_spacing(lat):
-    """dy/dx (in meters) for np.gradient() on this (curvilinear) lat grid -
+def _grid_spacing(lat, lon):
+    """dy/dx (in meters) for np.gradient() on this (curvilinear) grid -
     shared by build() and any other caller needing an SSH/depth/tau gradient
     on the same grid (e.g. run_batch_local's obs-comparison, which needs an
     SSH gradient computed the exact same way, just on a different time
-    window)."""
+    window). dx comes from longitude steps along axis 1, as in the original
+    THOR notebooks, taken mod 360 so a grid seam or the dateline doesn't
+    produce a ~-360 deg step."""
     lat_diff = 1.111774765625000e05
-    lat_roll = np.roll(lat, axis=0, shift=-1)
-    lon_diff = lat_roll - lat
+    lon_diff = (np.roll(lon, axis=1, shift=-1) - lon) % 360
     lat_y = np.gradient(lat, axis=0) * lat_diff
     lon_x = np.abs(np.cos(lat * np.pi / 180)) * lat_diff * lon_diff
     return lat_y, lon_x
+
+
+def _boxcar_kernel(width_cells):
+    """Symmetric boxcar exactly width_cells wide, a fractional width going
+    into the two end weights (4 -> [.5, 1, 1, 1, .5]), so the filter stays
+    centred and nulls a period of width_cells."""
+    if not np.isfinite(width_cells):  # degenerate row spacing
+        return np.ones(1)
+    half = (max(width_cells, 1.0) - 1) / 2
+    m = int(np.ceil(half))
+    k = np.ones(2 * m + 1)
+    if m > half:
+        k[0] = k[-1] = half - (m - 1)
+    return k
+
+
+def smooth_stress(tau, lat, lon, width_deg):
+    """Boxcar-average a wind stress field over width_deg of latitude and of
+    longitude, skipping land (NaN) cells and leaving them NaN.
+
+    For coupled models whose atmosphere is coarser than their ocean: the
+    coupler maps the atmosphere's stress onto the ocean grid, which leaves a
+    small step at every atmosphere cell edge. The 20-year mean keeps it
+    (the grid doesn't move), and the curl turns each step into a spike, so
+    regime maps pick up a waffle pattern at the atmosphere's grid spacing.
+    Averaging over one atmosphere cell removes it, and loses nothing real,
+    since the atmosphere never resolved anything finer. The window is set in
+    degrees and converted to cells row by row, so it follows grids whose
+    row spacing varies with latitude (Mercator, ORCA's equatorial band)."""
+    from scipy.ndimage import convolve1d
+
+    ok = np.isfinite(tau)
+    num, den = np.where(ok, tau, 0.0), ok.astype(float)
+    dlat = np.nanmedian(np.abs(np.gradient(lat, axis=0)), axis=1)
+    dlon = np.nanmedian((np.roll(lon, axis=1, shift=-1) - lon) % 360, axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        x_cells, y_cells = width_deg / dlon, width_deg / dlat
+
+    for i in range(tau.shape[0]):  # along x: periodic in longitude
+        k = _boxcar_kernel(x_cells[i])
+        num[i] = convolve1d(num[i], k, mode="wrap")
+        den[i] = convolve1d(den[i], k, mode="wrap")
+
+    out_num, out_den = np.zeros_like(num), np.zeros_like(den)
+    ny = tau.shape[0]
+    for i in range(ny):  # along y: kernel width set by this row's spacing
+        k = _boxcar_kernel(y_cells[i])
+        m = len(k) // 2
+        for j, w in zip(range(-m, m + 1), k):
+            r = min(max(i + j, 0), ny - 1)
+            out_num[i] += w * num[r]
+            out_den[i] += w * den[r]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(ok, out_num / out_den, np.nan)
 
 
 def _grad(d, y, x):
@@ -52,12 +107,12 @@ def _grad(d, y, x):
     return grad_y, grad_x
 
 
-def ssh_gradient(ssh, lat):
+def ssh_gradient(ssh, lat, lon):
     """grad_ssh_y, grad_ssh_x for an SSH field already on this module's
-    (ny, nx) lat grid - the same computation build() uses internally,
+    (ny, nx) lat/lon grid - the same computation build() uses internally,
     exposed so callers with their own SSH field (e.g. a differently
     time-windowed mean) can compute a directly comparable gradient."""
-    lat_y, lon_x = _grid_spacing(lat)
+    lat_y, lon_x = _grid_spacing(lat, lon)
     return _grad(ssh, lat_y, lon_x)
 
 
@@ -65,6 +120,7 @@ def build(
     zos_file, tauuo_file, tauvo_file, deptho_file,
     zos_var="zos", tauuo_var="tauuo", tauvo_var="tauvo", deptho_var="deptho",
     lat_var=None, lon_var=None, time_dim="time", land_fill_threshold=1e19,
+    stress_smooth_deg=None,
 ):
     """Returns X (n_valid, 8), valid_mask (ny, nx), lat (ny, nx), lon (ny, nx).
 
@@ -73,6 +129,9 @@ def build(
     use different variable names for these (GFDL: lat/lon, UKESM: latitude/
     longitude, NEMO-family: nav_lat/nav_lon) - auto-detected from
     LAT_VAR_CANDIDATES/LON_VAR_CANDIDATES unless overridden explicitly.
+
+    stress_smooth_deg: the atmosphere's grid spacing, for models whose
+    stress carries its imprint (see smooth_stress); None leaves it as is.
     """
     ssh = _time_mean(zos_file, zos_var, time_dim)
     tauu = _time_mean(tauuo_file, tauuo_var, time_dim)
@@ -86,7 +145,10 @@ def build(
     lat = depth_ds[resolved_lat_var].values
     lon = depth_ds[resolved_lon_var].values
 
-    lat_y, lon_x = _grid_spacing(lat)
+    lat_y, lon_x = _grid_spacing(lat, lon)
+    if stress_smooth_deg:
+        tauu = smooth_stress(tauu, lat, lon, stress_smooth_deg)
+        tauv = smooth_stress(tauv, lat, lon, stress_smooth_deg)
 
     omega = 7.2921e-5
     f = 2 * omega * np.sin(lat * np.pi / 180)

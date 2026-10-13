@@ -12,6 +12,10 @@
 # approximate method and stays basin-scoped even then, and settings.jsonc
 # for why this POD uses SHAP rather than LRP.
 #
+# Unless RUN_OBS_COMPARE is disabled, the case's regime map is also compared
+# cell-by-cell against a shipped observational THOR reference (DUACS
+# altimetry + scatterometer wind stress) - see thor_lib/obs_compare.py.
+#
 # See doc/THOR.rst for the underlying method (Yik et al. 2023, THOR-MOM6)
 # and references. This file is intentionally a thin orchestrator - the
 # actual feature/model/plotting code lives in thor_lib/, shared with
@@ -43,6 +47,8 @@ BASINS = [b for b in os.environ.get("BASINS", "").split(",") if b]
 FRONT_CONTOUR = os.environ.get("FRONT_CONTOUR", "true").lower() == "true"
 FRONT_PERCENTILE = float(os.environ.get("FRONT_PERCENTILE", "90"))
 RUN_EXPLAIN = os.environ.get("RUN_EXPLAIN", "false").lower() == "true"
+RUN_OBS_COMPARE = os.environ.get("RUN_OBS_COMPARE", "true").lower() == "true"
+OBS_SOURCE = os.environ.get("OBS_SOURCE", "scat")
 SHAP_BASIN = os.environ.get("SHAP_BASIN", "custom")
 SHAP_METHOD = os.environ.get("SHAP_METHOD", "fast")
 SHAP_BACKGROUND_SIZE = int(os.environ.get("SHAP_BACKGROUND_SIZE", "100"))
@@ -150,6 +156,52 @@ if RUN_EXPLAIN:
         background_size=SHAP_BACKGROUND_SIZE,
     )
     explain.plot_shap(shap_consist, in_basin, regime_map, lat, lon180, SHAP_BASIN, PS_DIR, CASENAME)
+
+# 5) Observational THOR comparison (shipped reference, see thor_lib/obs_compare.py) #
+if RUN_OBS_COMPARE:
+    from thor_lib import obs_compare
+
+    print(f"THOR: comparing against observational THOR (source={OBS_SOURCE!r})")
+    obs = obs_compare.load_obs(OBS_SOURCE)
+    model_on_obs_grid = obs_compare.match_to_grid(regime_map, lat, lon180, obs["lat"], obs["lon180"])
+    source_label = obs_compare.OBS_SOURCE_LABELS[OBS_SOURCE]
+
+    global_pct, global_n = obs_compare.agreement_pct(model_on_obs_grid, obs["regime"])
+    stats = [
+        f"Observational THOR ({source_label}) vs. {CASENAME}: % of shared cells in the same regime", "",
+        f"global: {global_pct:.1f}% ({global_n} cells)",
+    ]
+
+    compare_basins = [b for b in BASINS if b in plotting.BASIN_DEFS]
+    for key in compare_basins:
+        b = plotting.BASIN_DEFS[key]
+        basin_pct, basin_n = obs_compare.agreement_pct(
+            model_on_obs_grid, obs["regime"], obs_compare.basin_box(obs["lat"], obs["lon180"], b),
+        )
+        stats.append(f"{key} ({b['label']}): {basin_pct:.1f}% ({basin_n} cells)")
+
+        out_path = os.path.join(PS_DIR, f"{CASENAME}_obs_compare_{key}.eps")
+        plotting.plot_multi_basin(
+            key,
+            [
+                dict(field=obs["regime"], lat=obs["lat"], lon180=obs["lon180"],
+                     cmap=plotting.REGIME_CMAP, vmin=0, vmax=5, cbar_label="THOR regime class",
+                     tick_labels=plotting.REGIME_LABELS, title=f"Observations ({source_label})",
+                     front_contour=False, land_mask=obs["land_mask"], nodata_mask=obs["nodata_mask"]),
+                dict(field=regime_map, lat=lat, lon180=lon180,
+                     cmap=plotting.REGIME_CMAP, vmin=0, vmax=5, cbar_label="THOR regime class",
+                     tick_labels=plotting.REGIME_LABELS, title=f"{CASENAME}",
+                     front_contour=False),
+            ],
+            f"THOR regimes - {b['label']}: {basin_pct:.0f}% of shared cells agree with observations",
+            out_path, chrome=0.6,
+        )
+        print(f"THOR: saved {out_path}")
+
+    stats_path = os.path.join(NC_DIR, f"{CASENAME}_obs_compare_stats.txt")
+    with open(stats_path, "w") as f:
+        f.write("\n".join(stats) + "\n")
+    print("\n".join(stats))
 
 print("THOR: finished successfully")
 sys.exit(0)

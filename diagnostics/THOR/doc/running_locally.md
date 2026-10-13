@@ -41,35 +41,17 @@ cd ~/mdtf/MDTF-diagnostics
 #    WBC_var), there's no actual code path that picks a POD-specific env by name.
 #    Until that's resolved one way or another (see the open question in this
 #    repo's PR/commit history), THOR's deps get installed as their own env and
-#    ALIASED to the name the framework expects:
-cat > src/conda/env_python3_THOR_micromamba.yml <<'EOF'
-name: _MDTF_python3_THOR
-channels:
-- conda-forge
-dependencies:
-- python=3.12
-- pip=23.3.1
-- pip:
-    - numpy
-    - scipy
-    - xarray
-    - netCDF4
-    - scikit-learn
-    - matplotlib
-    - contourpy
-    - pandas
-    - h5py
-    - tensorflow
-    - keras
-    - shap
-EOF
+#    ALIASED to the name the framework expects. The env is defined, with pinned
+#    versions, in src/conda/env_python3_THOR_micromamba.yml (and the identical
+#    env_python3_THOR.yml for conda_env_setup.sh):
 ./src/conda/micromamba_env_setup.sh -e python3_THOR \
     --micromamba_root ~/micromamba --micromamba_exe ~/micromamba-bin/micromamba \
     --env_dir ~/conda_envs
+# Optional, only for RUN_EXPLAIN with SHAP_METHOD="fast" (the default method):
 # fastshap needs this env var - its own metadata still references the deprecated
 # "sklearn" PyPI alias, which refuses to install on its own otherwise
 ~/micromamba-bin/micromamba run -r ~/micromamba -p ~/conda_envs/_MDTF_python3_THOR \
-    bash -c "SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True pip install fastshap"
+    bash -c "SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True pip install fastshap==0.3.1"
 
 # alias it as the env the framework actually checks (see note above)
 ln -s ~/conda_envs/_MDTF_python3_THOR ~/conda_envs/_MDTF_python3_base
@@ -184,3 +166,11 @@ only way to change it is editing the default in `settings.jsonc` itself.
 `SHAP_BASIN` defaults to `"custom"`, a small user-defined window (see
 `CUSTOM_BASIN_*` in `settings.jsonc`) rather than one of the large named
 basins, to keep a full 50-model SHAP run practical.
+
+The two SHAP cost controls are that window and `SHAP_BACKGROUND_SIZE`.
+Runtime grows in proportion to the number of ocean points in the window,
+about 0.1 s per point for the 50-member ensemble, and by roughly
+0.85 + 0.0015 × background relative to the default background of 100
+(400 → 1.45×, 1,600 → about 3.3×). `settings.jsonc` lists per-model costs,
+and `THOR.log` prints an estimate before SHAP starts, with a warning banner
+when the run is long or the background is above the default.
