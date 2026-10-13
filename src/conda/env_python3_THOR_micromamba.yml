@@ -4,6 +4,13 @@ name: _MDTF_python3_THOR
 # runtime_requirements in diagnostics/THOR/settings.jsonc, and keep
 # env_python3_THOR.yml and env_python3_THOR_micromamba.yml identical.
 #
+# jupyterlab is here (not pip'd) for the same reason it's in
+# env_python3_base.yml: the POD's driver is THOR.ipynb, run via
+# `jupyter nbconvert --execute` (src/environment_manager.py). The framework
+# normally gets this from the shared _MDTF_python3_base env, but THOR has its
+# own env ALIASED to that name (see doc/running_locally.md), which overrides
+# it rather than extending it - so it has to be listed here too.
+#
 # fastshap is left out: its metadata still depends on the deprecated "sklearn"
 # PyPI alias, which refuses to install. It's needed only for RUN_EXPLAIN with
 # SHAP_METHOD="fast"; add it after building this env with:
@@ -12,6 +19,7 @@ channels:
 - conda-forge
 dependencies:
 - python=3.12
+- jupyterlab=4.1.0
 - pip=23.3.1
 - pip:
     - numpy==2.5.2

@@ -2,6 +2,12 @@
     Output template for the THOR POD. EPS files saved to
     <WK_DIR>/model/PS/<name>.eps are converted by the framework into
     <WK_DIR>/model/<name>.png, so links below only need the relative path.
+
+    The driver is THOR.ipynb, run via `jupyter nbconvert --execute`
+    (src/environment_manager.py), which writes its own rendered copy to
+    <WK_DIR>/THOR_ipynb.html - linked below. That file always exists after
+    any run (nbconvert writes it unconditionally), so it's safe to link
+    unconditionally too, unlike the SHAP/obs-compare plots further down.
 -->
 <title>THOR ocean dynamical regime classifier</title>
 <img src="../mdtf_diag_banner.png">
@@ -15,7 +21,7 @@ entropy: how much the 50 ensemble members agree, as a confidence
 companion to the majority-vote classification.
 </p>
 <p>
-{{CASENAME}}, {{startdate}}-{{enddate}}
+{{CASENAME}}, {{startdate}}-{{enddate}} - <A href=THOR_ipynb.html>driver notebook</A>
 </p>
 <TABLE>
 <TR>

@@ -18,7 +18,7 @@
 // for the chosen settings before SHAP starts.
 {
   "settings": {
-    "driver": "THOR.py",
+    "driver": "THOR.ipynb",
     "long_name": "THOR ocean dynamical regime classifier",
     "convention": "cmip",
     "description": "Classifies ocean dynamical regimes from SSH, wind stress curl, and bathymetry using THOR's pretrained ensemble",

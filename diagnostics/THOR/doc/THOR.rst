@@ -26,7 +26,9 @@ Version & Contact info
 Functionality
 -------------
 
-``THOR.py`` is a thin driver: it stages this case's SSH/wind-stress/
+``THOR.ipynb`` is a thin driver notebook (run via ``jupyter nbconvert
+--execute``, same as any notebook-driven MDTF POD): it stages this case's
+SSH/wind-stress/
 bathymetry, builds the 8-feature matrix (``thor_lib/features.py``), runs
 the ensemble and computes the entropy map (``thor_lib/ensemble.py``), and
 plots both maps whole-domain and per named basin with an optional SSH-
