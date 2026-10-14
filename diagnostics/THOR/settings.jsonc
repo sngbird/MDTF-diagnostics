@@ -93,8 +93,19 @@
       // informative mainly for historical-like forcing, not 1pctCO2/
       // abrupt-4xCO2.
       "RUN_OBS_COMPARE": "true",
-      "OBS_SOURCE": "scat"         // which shipped observational reference to use - only "scat" ships
+      "OBS_SOURCE": "scat",        // which shipped observational reference to use - only "scat" ships
                                     // today (obs_data/obs_scat_thor.npz)
+
+      // Name of the lat/lon coordinate variables in DEPTHO_FILE (features.py
+      // reads lat/lon from there, same file build() uses for the bathymetry
+      // field). Leave blank to auto-detect from the common CMIP6 naming
+      // conventions (lat/latitude/nav_lat, lon/longitude/nav_lon) - only set
+      // these if your model/a borrowed deptho file (see doc/THOR.rst's
+      // "If deptho isn't published for your experiment") uses something
+      // else, e.g. a piControl Ofx file published with vertices_latitude/
+      // vertices_longitude as the actual coordinate names instead.
+      "LAT_VAR": "",
+      "LON_VAR": ""
     },
 
     // THOR builds its own environment, _MDTF_python3_THOR, from

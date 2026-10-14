@@ -120,6 +120,57 @@ Required model output variables
 - ``deptho``: sea floor depth below geoid (ocean, static/fx) - a fixed
   property of the model's ocean grid, not a diagnosed quantity
 
+Data-staging notes
+--------------------
+
+**If** ``deptho`` **isn't published for the experiment you're running:**
+modeling centers don't always publish the static ``Ofx`` bathymetry table
+under every experiment, even though the underlying ocean grid is identical
+across all of a model's experiments - ``deptho`` is a fixed grid property,
+not a diagnosed quantity (that's also why its varlist entry in
+``settings.jsonc`` deliberately omits ``frequency``). UKESM1-0-LL is a real
+example from this POD's own development: it published ``deptho`` only under
+``piControl``, not under ``historical``, ``1pctCO2``, or ``abrupt-4xCO2`` -
+every one of those runs had to reuse the ``piControl`` file.
+
+The POD itself doesn't search for this - ``deptho`` is just whatever file
+``DEPTHO_FILE`` points to, resolved entirely by the framework's own catalog
+query. That query (see ``doc/running_locally.md``) filters only on
+``standard_name``/``units``/``realm``/``frequency`` and a path-regex match
+against the case name - **not** on ``experiment_id`` - so the fix is on the
+catalog side, not the code side: if your model doesn't publish ``deptho``
+under your case's experiment, find it under any other experiment of the
+*same* ``source_id`` (ESGF search by ``source_id`` + ``variable_id=deptho``
++ ``table_id=Ofx``, ignoring ``experiment_id``), then add a catalog row for
+it whose ``path`` still matches your case's own path regex (e.g. place the
+file inside that case's own data directory alongside ``zos``/``tauuo``/
+``tauvo``, regardless of which experiment the filename itself says it's
+from). One real snag this hit: the borrowed file can use different
+coordinate-variable names than the experiment it's borrowed for (UKESM1-0-
+LL's ``piControl`` ``Ofx`` file used ``vertices_latitude``/
+``vertices_longitude`` rather than the usual ``latitude``/``longitude``) -
+see ``LAT_VAR``/``LON_VAR`` below.
+
+**Running a fully custom (non-CMIP6) model:** this already works, and isn't
+a separate mode - it falls out of two things both being driven purely by
+metadata/naming rather than any ESGF/``source_id`` validation. First, the
+framework's catalog query (above) only checks each variable's
+``standard_name``/``units``/``realm``/``frequency`` and a path match against
+the case name - it has no notion of "is this a real published model." Second,
+``thor_lib/features.py`` only needs recognizable lat/lon coordinate
+variables on the bathymetry file - auto-detected from
+``LAT_VAR_CANDIDATES``/``LON_VAR_CANDIDATES`` (``lat``/``latitude``/
+``nav_lat`` and ``lon``/``longitude``/``nav_lon``), or overridden explicitly
+via the ``LAT_VAR``/``LON_VAR`` pod_env_vars if your data uses something
+else entirely. So: build your own intake-esm catalog over your own local
+``zos``/``tauuo``/``tauvo``/``deptho`` files (matching the metadata table in
+``doc/running_locally.md`` exactly) with a case directory path containing a
+name of your choosing, and the POD runs on it exactly as it would on a
+published CMIP6 model - nothing in ``THOR.ipynb`` or ``thor_lib/`` checks
+provenance. This is also how ``build_features.ipynb``'s "custom regular
+grid" mode works in the source project's standalone notebooks, outside the
+POD/framework entirely.
+
 References
 ----------
 
