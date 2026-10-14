@@ -28,14 +28,13 @@ Functionality
 
 ``THOR.ipynb`` is a thin driver notebook (run via ``jupyter nbconvert
 --execute``, same as any notebook-driven MDTF POD): it stages this case's
-SSH/wind-stress/
-bathymetry, builds the 8-feature matrix (``thor_lib/features.py``), runs
+SSH/wind-stress/bathymetry, builds the 8-feature matrix (``thor_lib/features.py``), runs
 the ensemble and computes the entropy map (``thor_lib/ensemble.py``), and
 plots both maps whole-domain and per named basin with an optional SSH-
 gradient front contour (``thor_lib/plotting.py``). It then compares the
 case's regime map against a shipped observational THOR reference
-(``thor_lib/obs_compare.py`` - see below), unless ``RUN_OBS_COMPARE`` is
-disabled.
+(``thor_lib/obs_compare.py``), unless ``RUN_OBS_COMPARE`` is disabled - see
+"Observational THOR reference" below for how that reference is built.
 
 If ``RUN_EXPLAIN`` is enabled, it also runs SHAP (Shapley values, one
 basin) feature attribution (``thor_lib/explain.py``), answering which of
@@ -55,21 +54,51 @@ slowly, with ``SHAP_BACKGROUND_SIZE`` (roughly 0.85 + 0.0015 × background
 relative to the default of 100). settings.jsonc lists per-model costs, and
 the POD logs an estimate, with a warning for long runs, before SHAP starts.
 
-Unless ``RUN_OBS_COMPARE`` is disabled, the case's regime map is also
-compared cell-by-cell against a shipped observational THOR reference
-(``thor_lib/obs_compare.py``): THOR run on DUACS altimetry SSH and
-scatterometer wind stress (ETOPO1 bathymetry), 2000-2014, on the same 0.5 deg
-grid THOR was trained on (ECCO). That reference was built outside this POD
-by the standalone ``THOR/obs_thor.py`` pipeline (it needs an external ERDDAP
-fetch this POD's runtime environment has no access to) and ships as a small
-digested file, ``obs_data/obs_scat_thor.npz``. The case's own regime map
-stays on its native grid; agreement is computed by nearest-neighbor-matching
-it onto the observational grid, reported globally and per basin in
-``BASINS`` (``<CASENAME>_obs_compare_stats.txt``), alongside an obs-vs-case
-regime map per basin (``<CASENAME>_obs_compare_<basin>.eps``). Since the
-reference only spans 2000-2014, treat this comparison as informative mainly
-for historical-like forcing, not an idealized/future scenario such as
-1pctCO2 or abrupt-4xCO2.
+Observational THOR reference
+------------------------------
+
+Unless ``RUN_OBS_COMPARE`` is disabled (on by default), the case's regime
+map is also compared cell-by-cell against THOR run on real-world
+observations rather than another model. That reference is built from three
+independent products, all averaged over 2000-2014 (the span common to the
+wind-stress record below):
+
+- **SSH**: Copernicus DUACS DT2021 absolute dynamic topography, fetched
+  from NOAA AOML's ERDDAP mirror, with the global-area mean removed from
+  each snapshot before averaging - ``zos`` is a relative field, not
+  absolute sea level, so the two need to be on the same footing.
+- **Wind stress**: monthly scatterometer stress composites from NOAA
+  CoastWatch's ERDDAP - QuikSCAT through Oct 2009 (its last full month),
+  then Metop-A ASCAT from Nov 2009, summed into the same per-year files the
+  SSH average uses. Coverage is limited to within 75 deg of the equator.
+- **Bathymetry**: ETOPO1, also from NOAA CoastWatch's ERDDAP.
+- **Coriolis parameter**: computed from latitude, same as the model side.
+
+THOR was trained on ECCO v4r3 (LLC90, ~1 deg) interpolated onto a 0.5 deg
+grid, and three of its eight features are spatial gradients, which grow at
+finer resolution - so each of the three source fields above is first
+block-averaged to 1 deg, then linearly interpolated onto ECCO's *exact*
+0.5 deg grid, mirroring how ECCO's own training inputs were built. THOR's
+features and ensemble then run on that grid exactly as they would on a
+model's native grid. The case's own (native-grid) regime map is compared to
+the result by nearest-neighbor-matching it onto that same 0.5 deg grid
+(within 0.75 deg of a valid cell), and reported as percent agreement
+globally and per basin in ``BASINS`` (``<CASENAME>_obs_compare_stats.txt``),
+alongside an obs-vs-case regime map per basin
+(``<CASENAME>_obs_compare_<basin>.eps``).
+
+This reference isn't built by the POD itself - it needs ERDDAP fetches the
+runtime environment has no access to - so it ships as a small, already-built
+digested file, ``obs_data/obs_scat_thor.npz`` (lat/lon, regime class, and
+land/no-data masks only - none of the raw input fields), produced once by
+the standalone ``THOR/obs_thor.py`` pipeline in the source project (see
+"More about this diagnostic" below) and committed alongside the POD's
+pretrained model weights. Altimetry and scatterometer coverage both drop
+out near coasts and poleward of 75 deg; those cells are reported as "ocean,
+no data" rather than outlined as coastline. Since the reference only spans
+2000-2014, treat this comparison as informative mainly for a case run under
+historical-like forcing, not an idealized/future scenario such as 1pctCO2
+or abrupt-4xCO2.
 
 Required programming language and libraries
 --------------------------------------------
